@@ -1,0 +1,63 @@
+@startuml
+autonumber
+title Tidepool — Core Turn Flow
+
+actor Player
+participant "GameController" as GC
+participant "TurnController" as TC
+participant "MovementSystem" as Move
+participant "WorldGrid" as Grid
+participant "Cell" as Cell
+participant "CollectionSystem" as Collect
+participant "InventorySystem" as Inv
+participant "TideSystem" as TideSys
+participant "TideModel" as Tide
+participant "SpawnSystem" as Spawn
+participant "HazardSystem" as Hazard
+
+== Start Turn ==
+Player -> GC : input command
+GC -> TC : begin Player phase
+
+== Player Phase ==
+GC -> Move : tryStep(player, dir)
+Move -> Grid : cellAt(targetX,targetY)
+Grid --> Move : target Cell
+Move -> Cell : canEnter(player)?
+alt enter allowed
+  Move --> GC : moved to target
+  alt target is Pool
+    GC -> Collect : tryCollect(player, Cell)
+    Collect -> Inv : add(loot bundle)
+    Inv --> Collect : updated inventory
+  else not a Pool
+    GC -> GC : no collection this step
+  end
+else blocked cell
+  Move --> GC : movement blocked
+end
+
+== Tide Phase ==
+GC -> TC : begin Tide phase
+GC -> TideSys : applyTurn(Grid, Tide)
+TideSys -> Tide : advanceOneTurn()
+TideSys -> Grid : recompute exposure
+
+== World Phase ==
+GC -> TC : begin World phase
+GC -> Spawn : populateOnExpose(newly exposed)
+Spawn --> GC : resources placed
+GC -> Spawn : despawnOnFlood(flooded cells)
+Spawn --> GC : resources cleared
+GC -> Hazard : checkTideCatch(player, Tide)
+alt player swept by tide
+  Hazard -> Inv : removeFractionRandom(player, 0.666...)
+  Inv --> Hazard : lost bundle returned
+else player safe
+  Hazard --> GC : no penalty
+end
+
+== UI Phase (logic only) ==
+GC -> TC : end turn / next
+
+@enduml
