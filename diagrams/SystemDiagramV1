@@ -1,0 +1,251 @@
+@startuml
+skinparam packageStyle rectangle
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+
+package Core {
+
+  class EventBus {
+    +publish(ev) : void
+    +subscribe(type, handler) : Subscription
+  }
+
+  class RNG {
+    +nextFloat() : float
+    +choose<T>(list:T[]) : T
+    +shuffle<T>(list:T[]) : void
+  }
+
+  enum Phase {
+    Player
+    Tide
+    World
+    UI
+  }
+
+  class TurnController {
+    +phase : Phase
+    +next() : void
+    +runTurn() : void
+  }
+
+  class GameController {
+    +start() : void
+    +step() : void
+    +handleInput(cmd) : void
+  }
+}
+
+package World {
+
+  class WorldGrid {
+    +width : int
+    +height : int
+    +cellAt(x:int,y:int) : Cell
+    +bounds : Rect
+  }
+
+  class Cell {
+    +x : int
+    +y : int
+    +type : CellType
+    +depth : float
+    +levelOffset : float
+    +resourceId : int
+    +canEnter(entity) : bool
+  }
+
+  enum CellType {
+    Water_White
+    Water_Deep
+    Sand_Dry
+    Sand_Wet
+    Pool_Deep
+    Pool_Shallow
+    Boulder_Small
+    Boulder_Large
+  }
+
+  class TideModel {
+    +phase : TidePhase
+    +waterLevel : float
+    +ebbStep : float
+    +floodStep : float
+    +edgeHoldTurns : int
+    +edgeHoldCounter : int
+    +isExposed(cell) : bool
+    +predictReachTime(cell) : float
+    +advanceOneTurn() : void
+  }
+
+  enum TidePhase {
+    Ebb
+    Slack
+    Flood
+  }
+
+  class SpawnTables {
+    +rollFor(type:CellType, rarityBoost:float, rng:RNG) : LootBundle
+    +rarityGradient(distance:float) : float
+  }
+
+  class PoolResource {
+    +id : int
+    +charges : int
+    +tableKey : String
+    +state : PoolState
+  }
+
+  enum PoolState {
+    Dormant
+    Populated
+    Depleted
+  }
+}
+
+package Systems {
+
+  abstract class GameSystem {
+    +update() : void
+  }
+
+  class TideSystem extends GameSystem {
+    +applyTurn(WorldGrid, TideModel) : void
+  }
+
+  class MovementSystem extends GameSystem {
+    +tryStep(player, dir) : void
+  }
+
+  class SwimSystem extends GameSystem {
+    +applySwimCost(player) : void
+    +ejectIfExhausted(player) : void
+  }
+
+  class CollectionSystem extends GameSystem {
+    +tryCollect(player, cell) : void
+  }
+
+  class HazardSystem extends GameSystem {
+    +checkTideCatch(player, TideModel) : void
+    +applySweepPenalty(player) : void
+  }
+
+  class InventorySystem extends GameSystem {
+    +add(player, item) : void
+    +removeFractionRandom(player, fraction:float) : LootBundle
+    +valueTotal(player) : int
+  }
+
+  class SpawnSystem extends GameSystem {
+    +populateOnExpose(cell) : void
+    +despawnOnFlood(cell) : void
+    +consumeCharge(poolId:int) : void
+  }
+
+  class StaminaSystem extends GameSystem {
+    +tickRegen(player) : void
+    +spend(player, amount:float) : bool
+  }
+}
+
+package Entities {
+
+  class Player {
+    +id : int
+    +pos : (int,int)
+    +canSwim : bool
+    +stamina : float
+    +staminaMax : float
+    +inventory : ItemStack[]
+  }
+
+  class ItemStack {
+    +kind : ItemKind
+    +count : int
+    +value : int
+    +rarity : float
+  }
+
+  enum ItemKind {
+    Shell
+    Starfish
+    Crab
+    Anemone
+    Pearl
+    Fossil
+  }
+}
+
+package Rendering {
+
+  class RenderingSystem {
+    +render(world, player) : void
+  }
+
+  class HUDSystem {
+    +showClock() : void
+    +showTideBar(level, phase) : void
+    +showInventory() : void
+    +showETAs() : void
+    +toast(msg) : void
+  }
+
+  class SpriteRegistry {
+    +getSprite(key) : Sprite
+    +getSpriteScaled(key, scale:int) : Sprite
+  }
+}
+
+package Audio {
+  class SoundManager {
+    +play(key) : void
+  }
+}
+
+package Persistence {
+  class SaveLoad {
+    +save() : void
+    +load() : void
+  }
+}
+
+'========================
+' Relationships
+'========================
+
+Core.GameController --> Core.TurnController : "controls turn flow"
+Core.GameController --> Systems.MovementSystem : "executes player movement"
+Core.GameController --> Systems.CollectionSystem : "handles item collection"
+Core.GameController --> Systems.StaminaSystem : "regenerates stamina"
+Core.GameController --> Systems.TideSystem : "advances tide phase"
+Core.GameController --> Systems.SpawnSystem : "processes spawns"
+Core.GameController --> Rendering.HUDSystem : "updates HUD display"
+
+Systems.MovementSystem --> World.WorldGrid : "queries target cell"
+Systems.MovementSystem --> World.Cell : "checks entry rules"
+
+Systems.SwimSystem --> Entities.Player : "reduces stamina"
+Systems.SwimSystem --> World.Cell : "checks swim cost"
+
+Systems.CollectionSystem --> World.WorldGrid : "locates pool cell"
+Systems.CollectionSystem --> World.PoolResource : "consumes pool charges"
+Systems.CollectionSystem --> Systems.InventorySystem : "adds collected item"
+
+Systems.HazardSystem --> World.TideModel : "checks tide position"
+Systems.HazardSystem --> Systems.InventorySystem : "removes lost items"
+
+Systems.TideSystem --> World.TideModel : "updates water level"
+Systems.TideSystem --> World.WorldGrid : "recomputes exposure"
+
+Rendering.RenderingSystem --> World.WorldGrid : "reads grid state"
+Rendering.RenderingSystem --> Entities.Player : "renders player"
+Rendering.HUDSystem <-- Core.EventBus : "listens to events"
+
+Audio.SoundManager <-- Core.EventBus : "subscribed sound events"
+
+Persistence.SaveLoad --> Entities.Player : "saves player state"
+Persistence.SaveLoad --> World.WorldGrid : "saves world grid"
+Persistence.SaveLoad --> World.TideModel : "saves tide model"
+Persistence.SaveLoad --> World.PoolResource : "saves pool data"
+@enduml
